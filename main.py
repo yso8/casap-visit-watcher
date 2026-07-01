@@ -34,6 +34,16 @@ import sys
 import time
 from datetime import datetime, timezone
 
+# --- DEBUG TEMPORAIRE : liste toutes les clés d'environnement visibles ---
+# (noms uniquement, jamais les valeurs) pour vérifier ce que le conteneur
+# reçoit réellement, avant même d'importer Playwright/requests.
+print("=" * 60, flush=True)
+print("DEBUG - Clés d'environnement visibles dans ce conteneur :", flush=True)
+for _k in sorted(os.environ.keys()):
+    print(f"  - {_k}", flush=True)
+print("=" * 60, flush=True)
+# --- fin debug temporaire ---
+
 import requests
 from playwright.sync_api import (
     Playwright,

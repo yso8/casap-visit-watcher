@@ -1,15 +1,12 @@
-FROM python:3.11-slim
-
-# Dépendances système nécessaires à Chromium (Playwright)
-ENV DEBIAN_FRONTEND=noninteractive
+# Image officielle Playwright : Chromium + toutes les dépendances système
+# sont déjà préinstallées et testées ensemble pour cette version exacte.
+# Évite les incompatibilités de paquets rencontrées avec python:3.11-slim.
+FROM mcr.microsoft.com/playwright/python:v1.45.0-jammy
 
 WORKDIR /app
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-
-# Installe Chromium + toutes les dépendances système requises
-RUN playwright install --with-deps chromium
 
 COPY main.py .
 

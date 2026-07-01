@@ -24,6 +24,9 @@ Variables d'environnement :
     MAX_SLEEP_SECONDS       borne haute du délai aléatoire (défaut 38)
     MAX_CONSECUTIVE_ERRORS  nb d'erreurs avant pause longue + redémarrage navigateur (défaut 10)
     LONG_BACKOFF_SECONDS    durée de la pause longue en cas d'erreurs répétées (défaut 300)
+    TEST_NOTIFICATION       "true" pour envoyer un message Telegram de test
+                            au démarrage, sans attendre un vrai créneau
+                            (défaut "false")
 """
 
 import json
@@ -33,16 +36,6 @@ import random
 import sys
 import time
 from datetime import datetime, timezone
-
-# --- DEBUG TEMPORAIRE : liste toutes les clés d'environnement visibles ---
-# (noms uniquement, jamais les valeurs) pour vérifier ce que le conteneur
-# reçoit réellement, avant même d'importer Playwright/requests.
-print("=" * 60, flush=True)
-print("DEBUG - Clés d'environnement visibles dans ce conteneur :", flush=True)
-for _k in sorted(os.environ.keys()):
-    print(f"  - {_k}", flush=True)
-print("=" * 60, flush=True)
-# --- fin debug temporaire ---
 
 import requests
 from playwright.sync_api import (
@@ -66,6 +59,7 @@ MIN_SLEEP_SECONDS = float(os.environ.get("MIN_SLEEP_SECONDS", "22"))
 MAX_SLEEP_SECONDS = float(os.environ.get("MAX_SLEEP_SECONDS", "38"))
 MAX_CONSECUTIVE_ERRORS = int(os.environ.get("MAX_CONSECUTIVE_ERRORS", "10"))
 LONG_BACKOFF_SECONDS = float(os.environ.get("LONG_BACKOFF_SECONDS", "300"))
+TEST_NOTIFICATION = os.environ.get("TEST_NOTIFICATION", "false").lower() == "true"
 
 GRAPHQL_HOST_FRAGMENT = "appsync-api.eu-west-1.amazonaws.com/graphql"
 USER_AGENT = (
@@ -139,6 +133,21 @@ def notify_slots_available(slots: list) -> None:
         f"🔗 <a href=\"{PAGE_URL}\">Réserver maintenant</a>\n\n"
         f"Détecté le {utcnow_iso()}"
     )
+    send_telegram_message(message)
+
+
+def send_test_notification() -> None:
+    """Envoie un message Telegram de test au démarrage (TEST_NOTIFICATION=true),
+    pour valider la chaîne d'envoi sans attendre un vrai créneau."""
+    message = (
+        "🧪 <b>Message de test — Casap Visit Watcher</b>\n\n"
+        f"Bien surveillé : <code>{ESTATE_ID}</code>\n"
+        f"🔗 <a href=\"{PAGE_URL}\">Lien de la page</a>\n\n"
+        "Si tu reçois ce message, la connexion Telegram fonctionne "
+        "correctement. Le watcher continue maintenant sa surveillance normale.\n\n"
+        f"Envoyé le {utcnow_iso()}"
+    )
+    logger.info("TEST_NOTIFICATION=true -> envoi d'un message Telegram de test.")
     send_telegram_message(message)
 
 
@@ -231,19 +240,6 @@ def create_browser_context(playwright: Playwright):
 
 
 def run() -> None:
-    # --- DEBUG TEMPORAIRE : affiche la forme exacte des variables lues ---
-    # (longueur + repr() pour repérer espaces, guillemets ou caractères
-    # invisibles, sans exposer la valeur complète du token)
-    token_preview = (
-        f"len={len(TELEGRAM_TOKEN)} repr={TELEGRAM_TOKEN[:6]!r}...{TELEGRAM_TOKEN[-4:]!r}"
-        if TELEGRAM_TOKEN
-        else "VIDE"
-    )
-    chat_preview = f"len={len(CHAT_ID)} repr={CHAT_ID!r}" if CHAT_ID else "VIDE"
-    logger.info("DEBUG TELEGRAM_TOKEN -> %s", token_preview)
-    logger.info("DEBUG CHAT_ID -> %s", chat_preview)
-    # --- fin debug temporaire ---
-
     if not TELEGRAM_TOKEN or not CHAT_ID:
         logger.critical(
             "TELEGRAM_TOKEN et/ou CHAT_ID ne sont pas définis. "
@@ -256,6 +252,9 @@ def run() -> None:
     logger.info("Page cible     : %s", PAGE_URL)
     logger.info("Intervalle     : %.0f-%.0f secondes", MIN_SLEEP_SECONDS, MAX_SLEEP_SECONDS)
     logger.info("Mode headless  : %s", HEADLESS)
+
+    if TEST_NOTIFICATION:
+        send_test_notification()
 
     state = SlotWatcherState()
     handler = make_response_handler(state)

@@ -149,6 +149,7 @@ l'image (nécessaire pour installer Chromium correctement).
 | `MAX_SLEEP_SECONDS` | ❌ | `38` | Borne haute du délai aléatoire |
 | `MAX_CONSECUTIVE_ERRORS` | ❌ | `10` | Nombre d'échecs avant pause longue + redémarrage navigateur |
 | `LONG_BACKOFF_SECONDS` | ❌ | `300` | Durée de la pause longue en cas d'erreurs répétées |
+| `TEST_NOTIFICATION` | ❌ | `false` | `true` pour envoyer un message Telegram de test au démarrage, sans attendre un vrai créneau |
 
 ---
 

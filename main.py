@@ -221,6 +221,19 @@ def create_browser_context(playwright: Playwright):
 
 
 def run() -> None:
+    # --- DEBUG TEMPORAIRE : affiche la forme exacte des variables lues ---
+    # (longueur + repr() pour repérer espaces, guillemets ou caractères
+    # invisibles, sans exposer la valeur complète du token)
+    token_preview = (
+        f"len={len(TELEGRAM_TOKEN)} repr={TELEGRAM_TOKEN[:6]!r}...{TELEGRAM_TOKEN[-4:]!r}"
+        if TELEGRAM_TOKEN
+        else "VIDE"
+    )
+    chat_preview = f"len={len(CHAT_ID)} repr={CHAT_ID!r}" if CHAT_ID else "VIDE"
+    logger.info("DEBUG TELEGRAM_TOKEN -> %s", token_preview)
+    logger.info("DEBUG CHAT_ID -> %s", chat_preview)
+    # --- fin debug temporaire ---
+
     if not TELEGRAM_TOKEN or not CHAT_ID:
         logger.critical(
             "TELEGRAM_TOKEN et/ou CHAT_ID ne sont pas définis. "

@@ -1,168 +1,152 @@
-# Casap Visit Slot Watcher
+# Casap Visit Watcher
 
-Surveille la page publique de liste d'attente Casap (ImmoAgenda) pour un bien
-donné, et envoie une notification Telegram dès qu'un créneau de visite
-devient disponible.
+Casap Visit Watcher is a lightweight Playwright worker that monitors property viewing availability and sends a Telegram alert when new visit slots appear.
 
-Le script utilise **Playwright** (navigateur headless) pour charger la page
-comme le ferait un visiteur humain, puis intercepte en arrière-plan la
-réponse de l'appel `GetVisitSlots` vers l'API GraphQL. Aucun jeton
-d'authentification n'est manipulé manuellement : c'est le site lui-même qui
-gère sa session, exactement comme dans un navigateur classique.
+It opens the public Casap / ImmoAgenda waiting-list page in Chromium, observes the GraphQL response that contains visit-slot availability, and notifies a configured Telegram chat when availability changes from none to one or more slots.
 
-⚠️ **Bon usage** : gardez un intervalle de vérification raisonnable (22-38s
-par défaut) pour rester léger sur les serveurs de Casap, et n'utilisez ce
-script que pour un usage personnel de surveillance d'un bien qui vous
-intéresse réellement.
+Python · Playwright · GraphQL · Docker · Telegram
 
----
+## Overview
 
-## 1. Fichiers du projet
+The worker is intended for personal monitoring of a property that you are interested in. It does not book a viewing and does not call the GraphQL API directly: the public page is loaded in a browser and its generated network response is observed.
 
-- `main.py` — le script principal
-- `requirements.txt` — dépendances Python
-- `Dockerfile` — nécessaire pour installer le navigateur Chromium sur
-  Railway/Render (Playwright a besoin de binaires navigateur, pas seulement
-  des paquets pip)
+## How it works
 
----
+```mermaid
+flowchart LR
+    A[Casap / ImmoAgenda page] --> B[Playwright Chromium]
+    B --> C[GraphQL GetVisitSlots response]
+    C --> D{Slots available?}
+    D -- No --> E[Keep watching]
+    D -- Yes, newly available --> F[Telegram notification]
+    D -- Yes, already notified --> E
+```
 
-## 2. Créer le bot Telegram
+On each cycle, the worker loads the configured property page and looks for a successful `GetVisitSlots` GraphQL response. It keeps the previous availability state so that Telegram is notified only when slots newly appear. If slots disappear and later return, a new notification is sent.
 
-1. Ouvrez Telegram et cherchez **@BotFather**.
-2. Envoyez la commande `/newbot`.
-3. Donnez un nom (ex. `Casap Watcher`) puis un identifiant unique se
-   terminant par `bot` (ex. `casap_watcher_bot`).
-4. BotFather vous renvoie un **token** du type :
-   ```
-   123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw
-   ```
-   → c'est votre `TELEGRAM_TOKEN`.
+## Features
 
-## 3. Récupérer le CHAT_ID
+- Monitors one Casap property identified by `ESTATE_ID`.
+- Uses Playwright and Chromium rather than a direct API client.
+- Sends a Telegram message with the number and a preview of available slots.
+- Supports a startup Telegram test message with `TEST_NOTIFICATION=true`.
+- Uses a randomized polling interval.
+- Recovers from repeated page failures with a long backoff and browser restart.
+- Restarts after an unrecoverable Playwright/browser failure.
+- Runs as a continuous local process or Docker worker.
 
-1. Démarrez une conversation avec votre bot (cherchez son
-   `@casap_watcher_bot` et cliquez sur **Démarrer** / envoyez `/start`).
-2. Envoyez-lui n'importe quel message (ex. `salut`).
-3. Dans un navigateur, allez sur :
-   ```
-   https://api.telegram.org/bot<VOTRE_TOKEN>/getUpdates
-   ```
-   (remplacez `<VOTRE_TOKEN>` par votre token, en gardant le `bot` devant).
-4. Dans la réponse JSON, cherchez :
-   ```json
-   "chat": { "id": 123456789, ... }
-   ```
-   → cette valeur `id` est votre `CHAT_ID`.
+## Requirements
 
-   Astuce : si vous voulez recevoir les notifications dans un groupe,
-   ajoutez le bot au groupe, envoyez un message dans le groupe, puis
-   refaites la même requête `getUpdates` : le `chat.id` sera négatif
-   (ex. `-1001234567890`), c'est normal pour un groupe.
+- Python 3.11 or a compatible Python version supported by the pinned dependencies.
+- Chromium installed by Playwright when running outside Docker.
+- A Telegram bot token and destination chat ID.
+- Access to the public Casap / ImmoAgenda page for the property being monitored.
 
----
+## Configuration
 
-## 4. Tester en local (optionnel)
+Provide the following values through the process environment. For Docker, they can be stored in a local `.env` file and passed with `--env-file`; local Python execution requires exporting or setting them in the shell. Never commit real credentials.
+
+```dotenv
+TELEGRAM_TOKEN=<telegram-bot-token>
+CHAT_ID=<telegram-chat-id>
+ESTATE_ID=<casap-property-id>
+HEADLESS=true
+MIN_SLEEP_SECONDS=22
+MAX_SLEEP_SECONDS=38
+MAX_CONSECUTIVE_ERRORS=10
+LONG_BACKOFF_SECONDS=300
+TEST_NOTIFICATION=false
+```
+
+| Variable | Required | Default | Description |
+| --- | --- | --- | --- |
+| `TELEGRAM_TOKEN` | Yes | — | Telegram bot token. |
+| `CHAT_ID` | Yes | — | Telegram chat or group ID. |
+| `ESTATE_ID` | No | The default ID in `main.py` | Casap property ID to monitor. |
+| `HEADLESS` | No | `true` | Set to `false` for local browser debugging. |
+| `MIN_SLEEP_SECONDS` | No | `22` | Lower bound of the randomized polling delay. |
+| `MAX_SLEEP_SECONDS` | No | `38` | Upper bound of the randomized polling delay. |
+| `MAX_CONSECUTIVE_ERRORS` | No | `10` | Consecutive page failures before recovery. |
+| `LONG_BACKOFF_SECONDS` | No | `300` | Pause before recreating the browser after repeated failures. |
+| `TEST_NOTIFICATION` | No | `false` | Send a Telegram test message at startup. |
+
+To create a bot, use Telegram's `@BotFather`. To find a chat ID, start the bot, send it a message, and inspect the response from Telegram's `getUpdates` endpoint. Treat both the bot token and chat ID as secrets or sensitive configuration.
+
+## Running locally
+
+Create a virtual environment, install the Python dependencies, and install Chromium:
 
 ```bash
-python -m venv venv
-source venv/bin/activate      # Windows : venv\Scripts\activate
+python -m venv .venv
+
+# macOS / Linux
+source .venv/bin/activate
+
+# Windows PowerShell
+.\.venv\Scripts\Activate.ps1
 
 pip install -r requirements.txt
-playwright install --with-deps chromium
+playwright install chromium
+```
 
-export TELEGRAM_TOKEN="123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw"
-export CHAT_ID="123456789"
-export ESTATE_ID="b1a30cd7-54a1-4b83-ba3c-9d55345962e7"   # optionnel, valeur par défaut déjà correcte
-export HEADLESS="false"   # mettre "false" pour voir le navigateur pendant les tests
+Set the variables from the configuration section, then run:
 
+```bash
 python main.py
 ```
 
-Vous devriez voir des logs comme :
+Use `HEADLESS=false` during local debugging if you want to see the browser window. Stop the worker with `Ctrl+C`.
+
+## Running with Docker
+
+The included Dockerfile uses the Playwright Python image, which already contains Chromium and its system dependencies.
+
+Build the image:
+
+```bash
+docker build -t casap-visit-watcher .
 ```
-2026-07-01 09:00:00 | INFO     | Démarrage du watcher Casap.
-2026-07-01 09:00:00 | INFO     | Bien surveillé : b1a30cd7-54a1-4b83-ba3c-9d55345962e7
-2026-07-01 09:00:01 | INFO     | Chargement de la page (déclenche l'appel GetVisitSlots)...
-2026-07-01 09:00:03 | INFO     | Requête GetVisitSlots interceptée (status=200).
-2026-07-01 09:00:03 | INFO     | Slots trouvés dans cette réponse : 0
-2026-07-01 09:00:03 | INFO     | Pause de 27.4s avant la prochaine vérification...
+
+Run it with an environment file containing your local secrets:
+
+```bash
+docker run --rm --env-file .env casap-visit-watcher
 ```
 
----
+The worker does not expose an HTTP port. Keep the container running as a worker process and inspect its standard output for logs.
 
-## 5. Déploiement sur Railway (recommandé)
+## Reliability and error handling
 
-Railway détecte automatiquement le `Dockerfile` et s'en sert pour construire
-l'image (nécessaire pour installer Chromium correctement).
+- Page-load timeouts and other loading errors are logged and counted.
+- After `MAX_CONSECUTIVE_ERRORS` failures, the worker waits for `LONG_BACKOFF_SECONDS`, closes the current browser context, and creates a fresh browser session.
+- If Playwright fails outside the normal page-loading path, the outer loop waits 60 seconds and starts the worker again.
+- Telegram is notified only on the transition to available slots, avoiding repeated messages while the same availability remains present.
 
-1. Poussez ce dossier sur un dépôt GitHub (public ou privé).
-2. Allez sur [railway.app](https://railway.app) et connectez-vous.
-3. Cliquez sur **New Project** → **Deploy from GitHub repo**.
-4. Sélectionnez votre dépôt. Railway détecte le `Dockerfile` et build
-   automatiquement.
-5. Allez dans l'onglet **Variables** du service et ajoutez :
-   | Variable | Valeur |
-   |---|---|
-   | `TELEGRAM_TOKEN` | votre token de bot |
-   | `CHAT_ID` | votre chat id |
-   | `ESTATE_ID` | `b1a30cd7-54a1-4b83-ba3c-9d55345962e7` (optionnel) |
-   | `HEADLESS` | `true` |
-6. Dans **Settings**, vérifiez que le service est bien de type **Worker**
-   (pas de port HTTP à exposer — le script tourne en continu, il n'écoute
-   aucun port). Si Railway insiste pour un port, vous pouvez ignorer
-   l'avertissement : ce n'est pas un service web.
-7. Déployez. Consultez l'onglet **Deployments → Logs** pour vérifier que le
-   script tourne et affiche bien ses logs.
-8. Railway garde le service actif en continu tant que le plan choisi le
-   permet (vérifiez les quotas d'heures selon votre formule).
+## Security and secrets
 
----
+- Keep `.env`, Telegram tokens, and chat identifiers out of version control.
+- Do not paste real credentials into documentation, issues, or logs.
+- The worker uses the browser session created by the public page and does not require a manually supplied Casap authentication token.
+- Use a reasonable polling interval and personal-use scope to avoid unnecessary load on the public service.
 
-## 6. Déploiement sur Render (alternative)
+## Limitations
 
-1. Poussez le projet sur GitHub comme ci-dessus.
-2. Sur [render.com](https://render.com), cliquez sur **New +** →
-   **Background Worker** (et non "Web Service", puisque ce script n'expose
-   aucun port HTTP).
-3. Connectez votre dépôt GitHub.
-4. Render détecte le `Dockerfile` automatiquement ; laissez **Environment =
-   Docker**.
-5. Choisissez un plan (le plan gratuit met le worker en veille après
-   inactivité si c'est un Web Service — préférez un plan payant pour un
-   Background Worker qui doit tourner 24/7).
-6. Dans **Environment**, ajoutez les mêmes variables que pour Railway :
-   `TELEGRAM_TOKEN`, `CHAT_ID`, `ESTATE_ID` (optionnel), `HEADLESS=true`.
-7. Déployez et surveillez les logs dans l'onglet **Logs**.
+- Availability depends on the public Casap / ImmoAgenda page and its current GraphQL response format. Changes to that service may require code updates.
+- The worker monitors one property per process and does not reserve a slot automatically.
+- Telegram delivery and the public page's availability are external dependencies.
+- The default worker is intentionally a continuous polling process; it does not provide a web UI, health endpoint, or historical database.
+- A Telegram notification means that availability was observed, not that the slot is still available when the link is opened.
 
----
+## Notification screenshot
 
-## 7. Variables d'environnement disponibles
+No screenshot is included yet. A Telegram notification screenshot can be added here later if a sanitized example is available; do not commit personal chat details or bot credentials.
 
-| Variable | Obligatoire | Défaut | Description |
-|---|---|---|---|
-| `TELEGRAM_TOKEN` | ✅ | — | Token du bot Telegram |
-| `CHAT_ID` | ✅ | — | ID du chat/groupe destinataire |
-| `ESTATE_ID` | ❌ | `b1a30cd7-54a1-4b83-ba3c-9d55345962e7` | ID du bien à surveiller |
-| `HEADLESS` | ❌ | `true` | `false` pour voir le navigateur (debug local uniquement) |
-| `MIN_SLEEP_SECONDS` | ❌ | `22` | Borne basse du délai aléatoire entre vérifications |
-| `MAX_SLEEP_SECONDS` | ❌ | `38` | Borne haute du délai aléatoire |
-| `MAX_CONSECUTIVE_ERRORS` | ❌ | `10` | Nombre d'échecs avant pause longue + redémarrage navigateur |
-| `LONG_BACKOFF_SECONDS` | ❌ | `300` | Durée de la pause longue en cas d'erreurs répétées |
-| `TEST_NOTIFICATION` | ❌ | `false` | `true` pour envoyer un message Telegram de test au démarrage, sans attendre un vrai créneau |
+## Project files
 
----
+- `main.py` — worker, browser lifecycle, GraphQL response handling, and Telegram notifications.
+- `requirements.txt` — pinned Python dependencies.
+- `Dockerfile` — reproducible Playwright/Chromium runtime image.
 
-## 8. Comportement en cas d'erreur
+## License
 
-- Chaque échec de chargement de page (timeout, erreur réseau, etc.) est
-  loggé et compté.
-- Après `MAX_CONSECUTIVE_ERRORS` échecs consécutifs, le script fait une
-  pause de `LONG_BACKOFF_SECONDS` puis redémarre complètement le navigateur
-  (nouveau contexte, nouvelle session) avant de reprendre.
-- Si Playwright plante entièrement (crash du process navigateur), le script
-  se relance automatiquement après 60 secondes plutôt que de s'arrêter.
-- Le script ne notifie qu'au **passage** de "aucun créneau" à "au moins un
-  créneau" — il ne spamme pas Telegram à chaque vérification tant que la
-  disponibilité reste inchangée. Si les créneaux disparaissent puis
-  réapparaissent, une nouvelle notification sera envoyée.
+This project is licensed under the MIT License; see [`LICENSE`](LICENSE).

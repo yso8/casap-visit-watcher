@@ -1,2 +1,26 @@
 .env
-/env
+.env.*
+!.env.example
+
+# Virtual environments and local Python artefacts
+env/
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Playwright/browser artefacts
+playwright-report/
+test-results/
+blob-report/
+
+# Local tooling and temporary files
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.log
+*.tmp
+*.temp
+Thumbs.db
+.DS_Store
